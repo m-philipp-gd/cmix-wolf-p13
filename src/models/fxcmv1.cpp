@@ -29,6 +29,7 @@
 #include "../attributes.h"
 #include "../page_contexts.h"
 #include "../page_registry.h"
+#include "../port_cfg.h"
 #include "../fast_math.h"
 #include "../word_recency.h"
 #include "../sentence_intersect.h"
@@ -1438,7 +1439,11 @@ struct ContextMap3 {
     void __attribute__ ((noinline)) Init(U32 m1, int c1, int s2, int s3,const U8 *nn1,int cs4,int k, const int u,short *st
     ) {
         C=min(c1, MAXCXT);
+#if PORT_BIGTAB_CM3
+        int m=m1*4;   // W3: every ContextMap3 table x2 (neif m1*2)
+#else
         int m=m1*2;
+#endif
         tmask=((m>>7)-1);
         cn=result=0;
         cxtMask=InitialContextMask(C);
@@ -4050,14 +4055,28 @@ Mix mmmO[4];
     scmA[1].Init(9);
     scmA[2].Init(8);
 
+#if PORT_RESTORE_MAPS16
+    maps1.Init(16,8);   // W2: 16 context bits (neif 15)
+    maps2.Init(16,8);
+#else
     maps1.Init(16 - (1),8);
     maps2.Init(16 - (1),8);
+#endif
     const int dccount=6;
+#if PORT_BIGTAB_DSM
+    // W3: every direct state map +1 bit (neif 28/29/24/27/26).
+    dcsm.Init(29,dccount-1, &STA7[0][0] );
+    dcsm0.Init(30,dccount, &STA7[0][0] );
+    dcsm1.Init(25,2, &STA7[0][0] );
+    dcsm2.Init(28,3, &STA7[0][0] );
+    dcsmN.Init(27,3, &STA7[0][0] );
+#else
     dcsm.Init(28,dccount-1, &STA7[0][0] );
     dcsm0.Init(29,dccount, &STA7[0][0] );
     dcsm1.Init(24,2, &STA7[0][0] );
     dcsm2.Init(27,3, &STA7[0][0] );
     dcsmN.Init(26,3, &STA7[0][0] );
+#endif
 
     // Mixers      size,  shift, err, errmul
     mxA[0].Init((0x8000),  75,  8, 14);

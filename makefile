@@ -42,7 +42,7 @@ DETNUM_SRC := src/detmath.cpp
 DET_ARCH := -march=x86-64-v3 -mtune=znver2
 DET_FP := -ffp-model=fast -mrecip=none
 FP_MODEL := -ffp-model=fast -mrecip=none
-LFLAGS := -m64 -fuse-ld=lld-19 -Wl,--gc-sections -std=c++17 -no-pie -Wl,--icf=all -Wl,-z,norelro -Wl,--version-script=runtime_exports.map -Wl,--as-needed -Wl,--build-id=none
+LFLAGS := -m64 -fuse-ld=lld-18 -Wl,--gc-sections -std=c++17 -no-pie -Wl,--icf=all -Wl,-z,norelro -Wl,--version-script=runtime_exports.map -Wl,--as-needed -Wl,--build-id=none
 STRIP_FLAG ?= -s
 OKB_EXTRA := 
 OPT1VEC_CXXFLAGS := -O3 -m64 -std=c++17 -march=x86-64-v3 -mtune=znver2 -fno-pie -fno-direct-access-external-data -fno-rtti -fvisibility=hidden -ffp-model=precise -ffp-contract=off -fno-math-errno -fno-builtin -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -fdata-sections -ffunction-sections
@@ -75,10 +75,10 @@ prof_gen: CPPFLAGS_PART-THAT-IS-COLD        += -fprofile-generate=$(ROOT_DIR)/pg
 prof_gen: LFLAGS                            += -fprofile-generate=$(ROOT_DIR)/pgo_data
 prof_gen: clean cmix
 
-prof_use: CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -fprofile-use=$(ROOT_DIR)/pgo_data
-prof_use: CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -fprofile-use=$(ROOT_DIR)/pgo_data -flto
-prof_use: CPPFLAGS_PART-THAT-IS-COLD        += -fprofile-use=$(ROOT_DIR)/pgo_data
-prof_use: LFLAGS                            += -fprofile-use=$(ROOT_DIR)/pgo_data -flto
+prof_use: CPPFLAGS_PART-THAT-CAN-BE-SLOW    +=
+prof_use: CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -flto
+prof_use: CPPFLAGS_PART-THAT-IS-COLD        +=
+prof_use: LFLAGS                            += -flto
 prof_use: clean cmix
 
 
@@ -169,9 +169,9 @@ all: cmix
 # and the article order).  It is never shipped and never packed; with
 # AUX_BUILD=1 the transformer head does not run, so the blocks are written the
 # same way they are later read.
-cmix_aux: CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -fprofile-use=$(ROOT_DIR)/pgo_data -DAUX_BUILD=1
-cmix_aux: CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -fprofile-use=$(ROOT_DIR)/pgo_data -flto -DAUX_BUILD=1
-cmix_aux: CPPFLAGS_PART-THAT-IS-COLD        += -fprofile-use=$(ROOT_DIR)/pgo_data -DAUX_BUILD=1
-cmix_aux: LFLAGS                            += -fprofile-use=$(ROOT_DIR)/pgo_data -flto
+cmix_aux: CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -DAUX_BUILD=1
+cmix_aux: CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -flto -DAUX_BUILD=1
+cmix_aux: CPPFLAGS_PART-THAT-IS-COLD        += -DAUX_BUILD=1
+cmix_aux: LFLAGS                            += -flto
 cmix_aux: clean cmix
 	mv cmix cmix_aux

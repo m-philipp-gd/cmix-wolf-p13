@@ -1,6 +1,7 @@
 #include "context-manager.h"
 #include "attributes.h"
 #include "page_registry.h"
+#include "port_cfg.h"
 
 extern unsigned long long wrtcxt;
 extern int lstmpr;
@@ -66,11 +67,21 @@ const unsigned char wrt_4b[256]={
 // GPL-3.0).  The initializer list follows the declaration order in
 // context-manager.h (clang warns otherwise); the order has no effect.
  ContextManager::ContextManager() : history_(60000000u, 0),
+#if PORT_RESTORE_SHARED
+    shared_map_(256*(std::size_t)1000000, 0),   // W2: 1M rows (neif 500k)
+#else
     shared_map_(256*(std::size_t)500000, 0),
+#endif
     words_(8, 0), recent_bytes_(8, 0),
     hashes_ind1((std::size_t)(dense_index::kN * dense_index::kN * dense_index::kN), 0),
     hashes_ind4(0x100, 0),
+#if PORT_RESTORE_IND
+    // W2: the double-indirect tables of fx2-cmix-transformer (0x1000000 and
+    // 0x2000000 entries); uint32 holds every value exactly (32- and 25-bit masks).
+    hashes_ind2(0x1000000, 0), hashes_ind3(0x2000000, 0),
+#else
     hashes_ind2(0, 0), hashes_ind3(0, 0),
+#endif
     hashes_ind5(0x100, 0) {
   PAGE_REGISTRY_ADD(history_.data(), history_.size());
   PAGE_REGISTRY_ADD(shared_map_.data(), shared_map_.size());
@@ -170,6 +181,18 @@ void ContextManager::UpdateWords() {
    bd1_d2_ = bd1_d1_; bd1_d1_ = bd1_d0_; bd1_d0_ = dense_index::kDigits.m[c];
    context1_ind = (bd1_d2_ * dense_index::kN + bd1_d1_) * dense_index::kN + bd1_d0_;
    ind1 = hashes_ind1[context1_ind];
+
+#if PORT_RESTORE_IND
+  // W2: update rule of fx2-cmix-transformer (training/tf/tree_upstream
+  // src/context-manager.cpp:138-144), verbatim.
+  hashes_ind2[context1_ind2] = (ind2 * (1 << 8) + c) & (0x100000000-1);
+  context1_ind2 = (context1_ind2 * (1 << 6) + c) & (0x1000000-1);
+  ind2 = hashes_ind2[context1_ind2];
+
+  hashes_ind3[context1_ind3] = (ind3 * (1 << 5) + c) & (0x2000000-1);
+  context1_ind3 = (context1_ind3 * (1 << 5) + c) & (0x2000000-1);
+  ind3 = hashes_ind3[context1_ind3];
+#endif
 
   hashes_ind5[context1_ind5] = (ind5 * (1 << 6) + c) & (0x40000000-1);
   context1_ind5 = c;

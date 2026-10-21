@@ -13,6 +13,7 @@
 
 #include "word_label.h"
 #include "page_registry.h"
+#include "port_cfg.h"
 
 #include <cmath>
 #include <cstdint>
@@ -37,8 +38,14 @@ constexpr int kCtx = 16;
 
 constexpr float kEtaN = (float)60 / 1000.0f;
 constexpr float kEtaE = (float)30 / 1000.0f;
+#if PORT_ETA0
+// WL2 eta0 (Z: -Dwordlbl-eta0=0.0225): its own eta for byte-0 trie nodes.
+constexpr float kEta0 = 0.0225f;
+constexpr bool kEta0Live = true;
+#else
 constexpr float kEta0 = (float)60 / 1000.0f;
 constexpr bool kEta0Live = (60 != 60);
+#endif
 constexpr float kLambda = (float)850 / 1000.0f;
 
 // The three numbers the instrument does not expose as build options; they are

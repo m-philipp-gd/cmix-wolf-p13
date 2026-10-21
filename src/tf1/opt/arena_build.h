@@ -27,6 +27,7 @@
 // stream). RoPE tables (32 MB, 256 B/token) live in separate heap vectors.
 #pragma once
 
+#include "../../port_cfg.h"
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -147,6 +148,12 @@ struct OptModel {
   std::vector<float> rope_sin, rope_cos;  // 131072 x 32 each
   float inv_freq[32] = {};
   PaketArenas paket;
+#if PORT_FW
+  // FW (Lane C port of Z h3_fw_native_patch_20260924): float copy of the
+  // unembedding, int8 weight x bf16 row scale, V x D row-major; read by the
+  // fast-weight backward in model_opt.cpp only.
+  std::vector<float> unembed_f32;
+#endif
 
   void load(const char* weights_path);
 };

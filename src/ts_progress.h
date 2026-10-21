@@ -2,6 +2,7 @@
 #define TS_PROGRESS_H_
 
 #include "metablock.h"
+#include "neif_levers.h"
 #ifndef AUX_BUILD
 #define AUX_BUILD 0
 #endif
@@ -40,10 +41,47 @@ struct Stats {
   unsigned long long hits = 0;
   unsigned long long ausgelassen = 0;
   long long abs_error = 0;
+  unsigned long long b2_basis = 0;      // E3b: B2 forecasts from the long baseline
 };
 
 static const unsigned char kNL = 0x0a;
 static const unsigned char kTab = 0x09;
+
+#if NEIF_E3B
+// E3b (work/h3_neif_meta_20261007/e3b_curve.py, m = 8): forecast of a B2
+// record k from the long baseline over the last 9 B2 records,
+//   t_{k-1} + (r_k - r_{k-1}) * (t_{k-1} - t_j) / (r_{k-1} - r_j),
+//   j = max(first B2 rank, k - 9),
+// floor division (Fdiv), integer only.  It returns false (the caller keeps the
+// median-of-32-slopes forecast) while fewer than two B2 records are known or
+// the baseline has no revid span.
+class B2Basis {
+ public:
+  enum { kN = 9 };
+  void Beobachte(long long rev, long long t) {
+    rev_[pos_] = rev; t_[pos_] = t;
+    pos_ = (pos_ + 1) % kN;
+    if (n_ < kN) ++n_;
+  }
+  bool Prognose(long long rev, long long* f) const {
+    if (n_ < 2) return false;
+    const int neu = (pos_ + kN - 1) % kN;              // record k-1
+    const int alt = (pos_ + kN - n_) % kN;             // record j
+    const long long dr = rev_[neu] - rev_[alt];
+    if (dr <= 0) return false;
+    const long long drev = rev - rev_[neu];
+    const long long dt = t_[neu] - t_[alt];
+    const long long kLim = 1LL << 31;                  // product < 2^62
+    if (drev >= kLim || drev <= -kLim || dt >= kLim || dt <= -kLim) return false;
+    *f = t_[neu] + Fdiv(drev * dt, dr);
+    return true;
+  }
+
+ private:
+  long long rev_[kN] = {0}, t_[kN] = {0};
+  int pos_ = 0, n_ = 0;
+};
+#endif
 
 class Aut {
  public:
@@ -66,6 +104,9 @@ class Aut {
         st_.abs_error += fehler < 0 ? -fehler : fehler;
       }
       sch_.Beobachte(Rev(k), t_k);
+#if NEIF_E3B
+      if (Oben(k)) b2_.Beobachte(Rev(k), t_k);
+#endif
       ++st_.b_zeilen;
       const size_t kn = k + 1;
       if (kn < metablock::mk.RangZahl()) Einspeisen(kn);
@@ -117,6 +158,12 @@ class Aut {
   void Einspeisen(size_t kn) {
     block_.clear();
     letzte_prognose_ = sch_.Prognose(Rev(kn));
+#if NEIF_E3B
+    if (Oben(kn)) {
+      long long f = 0;
+      if (b2_.Prognose(Rev(kn), &f)) { letzte_prognose_ = f; ++st_.b2_basis; }
+    }
+#endif
     if (Oben(kn)) {
       Dezimal(letzte_prognose_ - (sch_.Leer() ? 0LL : sch_.LetztesT()));
       block_.push_back(kTab);
@@ -196,6 +243,9 @@ class Aut {
   unsigned long long guard_pos_ = 0;
   std::vector<unsigned char> block_;
   Schaetzer sch_;
+#if NEIF_E3B
+  B2Basis b2_;
+#endif
   long long letzte_prognose_ = 0;
   Stats st_;
 };

@@ -1,7 +1,7 @@
 # The BITLSTM: trace, replay training, weights
 
 The BITLSTM is the small LSTM that corrects the final probability behind the
-mixer (section 4.4 of the top-level `README.md`); name and design are from
+mixer (section 4.4 of the `doc/README_upstream.md`); name and design are from
 David Freelan's `bitlstm32` in cmix-obias.  This entry ships trained weights for
 it, 7,386 bytes in bfloat16, compiled into the program as the byte array of
 `src/bit_head_weights.h`.  The compressor runs the BITLSTM with these weights

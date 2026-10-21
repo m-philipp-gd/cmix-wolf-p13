@@ -3,7 +3,11 @@
 
 #include "metablock.h"
 
+#include "neif_levers.h"
 #include "ts_progress.h"
+#if NEIF_E1
+#include "b1_interp.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -169,6 +173,21 @@ static inline long long ALeseRev(const unsigned char* p, int n, bool s4) {
   return v;
 }
 
+#if NEIF_E1
+// E1: signed decimal page id delta of a part-A line, [p, e) = "[-]digits".
+static inline long long LiesDelta(const unsigned char* p, const unsigned char* e) {
+  int vz = 1;
+  if (p < e && *p == 0x2d) { vz = -1; ++p; }
+  if (p == e) Fail("page id delta empty");
+  long long d = 0;
+  for (; p < e; ++p) {
+    if (!Ziffer(*p)) Fail("page id delta not numeric");
+    d = d * 10 + (*p - 0x30);
+  }
+  return vz * d;
+}
+#endif
+
 static inline void Rangfolge(std::vector<long long>* rev) {
   std::sort(rev->begin(), rev->end());
   for (size_t i = 1; i < rev->size(); ++i)
@@ -196,6 +215,10 @@ static inline void Rangfolge(std::vector<long long>* rev) {
   out.insert(out.end(), d.begin(), d.begin() + (long)ab);
 
   // ---- part A ----
+#if NEIF_E1
+  b1_interp::Interp b1;
+  long long pid = 0;
+#endif
   for (size_t i = 0; i < nn; ++i) {
     const unsigned char* p = &d[z[i]];
     const int n = (int)(z[i + 1] - z[i] - 1);
@@ -211,7 +234,18 @@ static inline void Rangfolge(std::vector<long long>* rev) {
         rv = rv * 10 + (*q - 0x30);
       }
       out.insert(out.end(), p, t);                 // page id delta, decimal
+#if NEIF_E1
+      pid += LiesDelta(p, t);
+      if (rv < b1_interp::kB1Max) {                // B1: '+' residual vs interpolation
+        out.push_back(b1_interp::kMark);
+        Dezimal(&out, rv - b1.Prognose(pid));
+        b1.Add(pid, rv);
+      } else {
+        Fest(&out, rv, 4);
+      }
+#else
       Fest(&out, rv, 4);
+#endif
       if (t2) out.insert(out.end(), t2, e);        // TAB restrictions
     }
     out.push_back(kNL);
@@ -259,27 +293,68 @@ static inline void Rangfolge(std::vector<long long>* rev) {
   Zeilen(d, ab, bis, &z);
 
   std::vector<long long> rev(nn);
+#if !NEIF_E1
   for (size_t i = 0; i < nn; ++i)
     rev[i] = ALeseRev(&d[z[i]], (int)(z[i + 1] - z[i] - 1), true);
   Rangfolge(&rev);
+#endif
 
   std::vector<unsigned char> out;
   out.reserve(d.size() + d.size() / 4);
   out.insert(out.end(), d.begin(), d.begin() + (long)ab);
 
   // ---- part A ----
+#if NEIF_E1
+  // E1: a B1 revid needs the interpolation over the earlier B1 lines, so the
+  // revids are computed here, in stream order, and checked afterwards.
+  b1_interp::Interp b1;
+  long long pid = 0;
+#endif
   for (size_t i = 0; i < nn; ++i) {
     const unsigned char* p = &d[z[i]];
     const int n = (int)(z[i + 1] - z[i] - 1);
     {
       const unsigned char* e = p + n;
       const unsigned char* t = (const unsigned char*)memchr(p, kTab, (size_t)n);
+#if NEIF_E1
+      const unsigned char* fe = t ? t : e;         // end of field 1
+      const unsigned char* dz = p;
+      if (dz < fe && *dz == 0x2d) ++dz;
+      while (dz < fe && Ziffer(*dz)) ++dz;
+      long long v = 0;
+      const unsigned char* r = nullptr;            // end of the page id delta
+      if (dz < fe && *dz == b1_interp::kMark) {    // B1: delta '+' [-]residual
+        r = dz;
+        pid += LiesDelta(p, r);
+        const unsigned char* q = r + 1;
+        long long res = 0;
+        int vz = 1;
+        if (q < fe && *q == 0x2d) { vz = -1; ++q; }
+        if (q == fe) Fail("B1 line without revid residual");
+        for (; q < fe; ++q) {
+          if (!Ziffer(*q)) Fail("revid residual not numeric");
+          res = res * 10 + (*q - 0x30);
+        }
+        v = b1.Prognose(pid) + vz * res;
+        if (v < 0) Fail("B1 revid negative");
+        b1.Add(pid, v);
+      } else {                                     // B2: delta + 4 base-100 bytes
+        r = fe - 4;
+        if (r < p) Fail("A line without four revid digits");
+        pid += LiesDelta(p, r);
+        v = LiesFest(r, 4);
+      }
+      rev[i] = v;
+#else
       const unsigned char* r = (t ? t : e) - 4;
       if (r < p) Fail("A line without four revid digits");
+#endif
       out.insert(out.end(), p, r);                 // page id delta, decimal
       out.push_back(kTab);
       {
+#if !NEIF_E1
         long long v = LiesFest(r, 4);
+#endif
         char b[24];
         for (int q = kRevDig - 1; q >= 0; --q) { b[q] = (char)('0' + (int)(v % 10)); v /= 10; }
         if (v) Fail("revid has too many digits");
@@ -289,6 +364,9 @@ static inline void Rangfolge(std::vector<long long>* rev) {
     }
     out.push_back(kNL);
   }
+#if NEIF_E1
+  Rangfolge(&rev);
+#endif
 
   // ---- part B ----
   unsigned long long n_oben = 0, n_unten = 0;

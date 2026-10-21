@@ -250,6 +250,21 @@ struct Tf1Engine::Impl {
   bool gate_masked = false;
   unsigned long long alias_rows = 0;
   bool in_redir_run = false;
+#if PORT_FW
+  // FW pairing (training target rule, training/tf/tree_overlay/zctx/
+  // dumpv2.py: the target of a row is the next STREAM token past all inserted
+  // rows; a document's last row targets its closing token, coded but never
+  // fed).  fw_have: the transformer's FW scratch holds the prediction of a
+  // read row that has not had its target yet (any later read row, inserted
+  // or not, supersedes it).  fw_live: the FW slot row the predictor codes the
+  // next stream token with came from the FW head (not neutral/off/PPMd).  The
+  // update happens at the start of the next stream Step(), with that token.
+  bool fw_have = false;
+  bool fw_live = false;
+  bool probs_from_tf = false;  // s.probs was taken from tf_out (a read row)
+  std::vector<float> fw_row;
+  std::vector<uint16_t> fw_half;
+#endif
   void Feed(int tok, const uint16_t* prior, bool inserted, float* out
             , bool gelesen
            ) {
@@ -260,6 +275,9 @@ struct Tf1Engine::Impl {
     ch.match_byte = inserted ? 208 : m_hot;
     ch.match_class = inserted ? 0 : (m_class & 15);
     opt->step((uint8_t)tok, prior, out, ch);
+#if PORT_FW
+    if (gelesen) fw_have = true;
+#endif
     pk_prev2 = pk_prev1;
     pk_prev1 = tok;
     ++pk_fed;
@@ -307,6 +325,10 @@ LOAD_PATH_ATTR Tf1Engine::Tf1Engine(const std::vector<bool>& vocab, const char* 
   impl_->half.assign(208, 0);
   impl_->ppmd_cur.assign(208, 0);
   impl_->ppmd_prev.assign(208, 0);
+#if PORT_FW
+  impl_->fw_row.assign(208, 1.0f);
+  impl_->fw_half.assign(208, 0);
+#endif
   impl_->sep_len = SeparatorLength();
   if (impl_->sep_len > (int)sizeof(impl_->window)) {
     Fail("article separator longer than the match window");
@@ -419,6 +441,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
            GATE_ARG(last_row, Impl::SG_ALIAS));
     FloatsToHalves(s.tf_out.data(), s.half.data(), 208);
     HalvesToFloats(s.half.data(), s.probs.data(), 208);
+#if PORT_FW
+    s.probs_from_tf = true;
+#endif
     if (s.probs_writer) s.probs_writer->WriteHalves(s.half.data(), 208);
     for (int i = 0; i < 208; ++i) {
       if (!(s.probs[i] >= 1e-6f)) s.probs[i] = 1e-6f;
@@ -445,6 +470,12 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
   if (token < 0) {
     Fail("byte 0x%02x is not in the frozen byte set", byte);
   }
+#if PORT_FW
+  // FW target: this stream token, if it was coded with an FW-head row.
+  if (s.fw_have && s.fw_live && s.opt) s.opt->fw_update((uint8_t)token);
+  s.fw_have = false;
+  s.fw_live = false;
+#endif
   redirect_table::tab.Byte((unsigned char)byte);
   alias_table::tab.Byte((unsigned char)byte);
   // Gate: the flag for this token was fixed after the previous one; the
@@ -518,6 +549,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
   if (last_of_piece) {
     // The next token starts a fresh context; its distribution is PPMd's.
     HalvesToFloats(s.half.data(), s.probs.data(), 208);
+#if PORT_FW
+    s.probs_from_tf = false;
+#endif
     s.article_tokens = 0;
     s.NewDocument();
     if (s.opt) s.opt->begin_article();
@@ -616,6 +650,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
     // carries that prior, the same row as in the `last_of_piece` branch.
     if (s.prompt->PriorNext()) {
       HalvesToFloats(s.half.data(), s.probs.data(), 208);
+#if PORT_FW
+      s.probs_from_tf = false;
+#endif
     } else {
     // Link-context prefix.  It ends on the separator sequence, the reset
     // trigger, so it is fed directly through `step()`: `window` and
@@ -639,6 +676,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
     }
     FloatsToHalves(s.tf_out.data(), s.half.data(), 208);
     HalvesToFloats(s.half.data(), s.probs.data(), 208);
+#if PORT_FW
+    s.probs_from_tf = true;
+#endif
     }
   }
   if (at_separator) {
@@ -657,6 +697,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
         s.prompt->AddFed((unsigned long long)vn);
         FloatsToHalves(s.tf_out.data(), s.half.data(), 208);
         HalvesToFloats(s.half.data(), s.probs.data(), 208);
+#if PORT_FW
+        s.probs_from_tf = true;
+#endif
       } else {
         s.pre_verworfen_zone += (unsigned long long)vn;
       }
@@ -681,6 +724,27 @@ void Tf1Engine::SetMatch(int hot_byte, int raw_len_bits) {
 }
 
 bool Tf1Engine::GateMasked() const { return impl_->gate_masked; }
+
+#if PORT_FW
+const float* Tf1Engine::FwRow() {
+  Impl& s = *impl_;
+  if (s.probs_from_tf && s.opt) {
+    // the same float16 rounding and 1e-6 floor as the transformer row
+    FloatsToHalves(s.opt->fw_probs(), s.fw_half.data(), 208);
+    HalvesToFloats(s.fw_half.data(), s.fw_row.data(), 208);
+    for (int i = 0; i < 208; ++i) {
+      if (!(s.fw_row[i] >= 1e-6f)) s.fw_row[i] = 1e-6f;
+    }
+    s.fw_live = true;
+  } else {
+    memcpy(s.fw_row.data(), s.probs.data(), sizeof(float) * 208);
+    s.fw_live = false;
+  }
+  return s.fw_row.data();
+}
+
+void Tf1Engine::FwNeutral() { impl_->fw_live = false; }
+#endif
 
 // Pure observation, see tf1_engine.h.
 const float* Tf1Engine::LastHidden() const {

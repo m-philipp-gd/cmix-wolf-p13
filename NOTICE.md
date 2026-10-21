@@ -59,7 +59,7 @@ The pre-trained weights shipped with this entry, those of the transformer and
 those of BITLSTM, were **trained for this entry**, on `enwik9` alone.
 Neither Ivanov's weights, nor his article-separator constant, nor his
 preprocessor are used, and no weights of `cmix-obias` are used. How the weights
-were produced is described in section 5 of `README.md` and in
+were produced is described in section 5 of `doc/README_upstream.md` and in
 `training/README.md`. The borrowed parts are named in
 `training/ATTRIBUTION.md`.
 

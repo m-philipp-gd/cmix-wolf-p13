@@ -17,6 +17,7 @@
 // first token of a piece, float16 rounding and the 1e-6 floor of each row).
 
 #include "../transformer.h"
+#include "../port_cfg.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -95,6 +96,18 @@ class Tf1Engine {
 
   // End-of-run check: stops if a document exceeded the rotary-table length.
   void ReportChannels() const;
+
+#if PORT_FW
+  // FW-DUAL row for the slot fw_slot_, to be called right after Step() when
+  // the transformer row goes to the slot: the FW-head distribution of the
+  // same read row the Step() row came from (float16-rounded and 1e-6-floored
+  // like that row), or a copy of the Step() row when it came from the PPMd
+  // prior (piece start, title/sentinel prior).  Marks the next stream token
+  // as a target of the FW head iff the row came from the FW head.
+  const float* FwRow();
+  // The slot is neutral or off for the next stream token: no FW target.
+  void FwNeutral();
+#endif
 
  private:
   struct Impl;

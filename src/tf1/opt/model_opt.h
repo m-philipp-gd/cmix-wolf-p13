@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "../tf1_paket.h"
+#include "../../port_cfg.h"
 
 
 namespace fx2 {
@@ -86,6 +87,18 @@ struct TransformerOpt {
   static int hidden_size();
 
   AttnKind attn_kind() const;
+
+#if PORT_FW
+  // FW-DUAL (Lane C port of Z third_party/fx2_transformer, h3_fw*/fwdual/
+  // fw_rules/fw_row patches): fast weights dW on the last MLP; every read row
+  // also produces the distribution of a second head on x + dW h.
+  // fw_update(y): one step of dW on the prediction of the LAST read row with
+  // target token y (< 208).  Call before the next read row overwrites it.
+  void fw_update(uint8_t target);
+  // the 208 FW-head probabilities of the last read row (valid until the
+  // next read row)
+  const float* fw_probs() const;
+#endif
 
  private:
   std::unique_ptr<TransformerOptImpl> impl;

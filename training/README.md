@@ -160,7 +160,7 @@ preprocessing invalidates the model and forces a retrain.
 | sha256 | `8e0b264a777cb56a6be48c58002450c4711b1cebf3ffcb0129a32ef34273c3ba` |
 | distinct byte values | exactly 208 (`vocab-bitmap.u8`, popcount 208) |
 | article order | md5 of `.main_reordered` `28ca879dcfdafe7833b042f58cfee517` (`data/README.md` section 3) |
-| gate zone | segment bytes 1 to 5,164,202: the metadata block (section 4.3 of the top-level `README.md`); withheld from the transformer |
+| gate zone | segment bytes 1 to 5,164,202: the metadata block (section 4.3 of the `doc/README_upstream.md`); withheld from the transformer |
 | training tokens | 547,586,001, from segment byte 5,164,203 to the end |
 
 A compression run of the submitted build codes exactly this stream.
@@ -240,7 +240,7 @@ The full list with checksums is in `MANIFEST.tsv` (rows starting with `REF:`).
   page rows (page number, page id, contributor, date), then the title, then the
   prompt rows (synonyms, link context, aliases), then the body with its insertions (contributor row, heading reminders, digit-run
   classes). The content of each kind is described in section 4.2 of the
-  top-level `README.md`. The title is fed and predicted; prompt and page rows
+  `doc/README_upstream.md`. The title is fed and predicted; prompt and page rows
   are fed and never scored. Every inserted row carries `src = -1`. It receives
   the replacement prior vector `prior0` instead of a PPMd prior, except the last
   row of an inserted block, which receives the PPMd row of the next stream byte,
@@ -472,7 +472,7 @@ the program prints the fingerprint it reads when it refuses a container.
 ## 7. The BITLSTM
 
 The BITLSTM adds a learned correction to the final probability in logit space
-(top-level `README.md` section 4.4). The design is David
+(`doc/README_upstream.md` section 4.4). The design is David
 Freelan's (`bitlstm32` in `cmix-obias`, `ATTRIBUTION.md` section 3). Its
 shipped weights were trained offline, on a trace of a compression run of this
 configuration; `bitl/README.md` describes the chain and ships the tools:

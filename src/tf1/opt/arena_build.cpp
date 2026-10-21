@@ -243,6 +243,20 @@ void OptModel::load(const char* weights_path) {
     die("layer pattern mismatch");
 
   unembed = qsite("unembedding", V, D, true);
+#if PORT_FW
+  {  // FW: float copy of the unembedding for the fast-weight backward (Z arena_build.cpp:376-385)
+    const WTensor& uq = wf.get("unembedding.weight.q", DT_I8,
+                               {static_cast<uint32_t>(V), static_cast<uint32_t>(D)});
+    const WTensor& us = wf.get("unembedding.weight.scale", DT_BF16,
+                               {static_cast<uint32_t>(V)});
+    unembed_f32.assign(size_t(V) * D, 0.0f);
+    for (int o = 0; o < V; o++) {
+      const float sc = bf16_to_f32(us.bf16_bits()[o]);
+      for (int i = 0; i < D; i++)
+        unembed_f32[size_t(o) * D + i] = float(uq.i8()[size_t(o) * D + i]) * sc;
+    }
+  }
+#endif
   stream_bytes = round64(off);
 
   // ---- non-stream data: tail slack gap, then the normed embedding table ----

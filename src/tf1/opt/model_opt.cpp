@@ -287,6 +287,30 @@ struct TransformerOptImpl {
   // sum, `pk` the channels of the row that step() is about to consume.
   alignas(64) float tok_paket[D] = {};
   PaketChannels pk;
+#if PORT_FW
+  // FW state (Z h3_fw_native_patch_20260924 + fwdual + fw_rules + fw_row).
+  // dW is column-per-h-index: dW[i*D + j]; zero-init, never reset.
+  // FWK > 1 (port_cfg.h PORT_FW_LAYERS, arms F2/F4 2026-10-07): one dW per
+  // block for the last FWK MLP blocks (block k = layer NL-FWK+k, so k = FWK-1
+  // is the last MLP, the only block of B); all FWK deltas go into the ONE dual
+  // head on x + sum_k dW_k h_k.  dW_k is fw_dW[(k*DMLP + i)*D + j].
+  static constexpr int FWK = PORT_FW_LAYERS;
+  static_assert(FWK >= 1 && FWK <= 8, "PORT_FW_LAYERS out of range");
+  std::vector<float> fw_dW = std::vector<float>(size_t(FWK) * DMLP * D, 0.0f);
+  int fw_nnz[FWK] = {};
+  uint16_t fw_idx[FWK][DMLP] = {};
+  float fw_h[FWK][DMLP] = {};
+  bool fw_gel = true;     // the current step() is a read row (captures h)
+  alignas(64) float fw_xn[D] = {};
+  float fw_denom = 0.0f;
+  float fw_lc[208] = {}, fw_p[208] = {};
+  uint64_t fw_t = 0;      // FW-RULES update counter
+  float fw_v[FWK][DMLP] = {};  // FW-ROW EMA of h_i^2 (per block)
+  float fw_sh[FWK][DMLP] = {};
+  alignas(64) float fw_dx[D] = {}, fw_x2[D] = {}, fw_xn2[D] = {};
+  alignas(64) uint8_t fw_q[256] = {};
+  alignas(64) float fw_logits[208] = {}, fw_probs208[208] = {};
+#endif
 
   COLD_SIZE_ATTR explicit TransformerOptImpl(const char* path, AttnKind k) : kind(k) {
     M.load(path);
@@ -567,7 +591,128 @@ struct TransformerOptImpl {
       else
         qsparse4_add(mm.down, q768, idx768, nnz, x);
     }
+#if PORT_FW
+    // FW: the relu^2 code (raw u8 x static scale) of the last FWK MLPs, on
+    // read rows only.  mlp_block(NL-1) runs on read rows only (an unread row
+    // stops before the last layer); the earlier blocks also run on unread
+    // rows, whose code must not replace the read row's (fw_gel).
+    if (fw_gel && l >= NL - FWK)
+      fw_apply(l - (NL - FWK), mm.up.m.d_out, mm.down_s_act);
+#endif
   }
+
+#if PORT_FW
+  // FW forward: h_i = q768[i] * s over the nonzero h_i of the last MLP (width
+  // w <= DMLP: dead neurons were removed from the container; they are always 0
+  // and are exactly the ones that never enter here).  DUAL: x stays untouched,
+  // the fast-weight delta goes to fw_dx.
+  // Block b (0 = the first FW block, which runs first in every read row and
+  // clears fw_dx); the deltas of the blocks are summed into fw_dx.
+  void fw_apply(int b, int w, float s) {
+    int nnz = 0;
+    uint16_t* const idx = fw_idx[b];
+    float* const h = fw_h[b];
+    for (int i = 0; i < w; i++) {
+      if (q768[i] == 0) continue;
+      const float hv = float(q768[i]) * s;
+      idx[nnz] = uint16_t(i);
+      h[nnz] = hv;
+      nnz++;
+    }
+    fw_nnz[b] = nnz;
+    if (b == 0)
+      for (int j = 0; j < D; j++) fw_dx[j] = 0.0f;
+    const float* const dWb = fw_dW.data() + size_t(b) * DMLP * D;
+    for (int k = 0; k < nnz; k++) {
+      const float* col = dWb + size_t(idx[k]) * D;
+      const float hv = h[k];
+      for (int j = 0; j < D; j++) fw_dx[j] += col[j] * hv;
+    }
+  }
+
+  // DUAL: the fast-weight head from x + dW h into its own buffers (the static
+  // head, xn/q5/logits/probs208 and last_hidden(), stay untouched).
+  void fw_head() {
+    for (int i = 0; i < D; i++) fw_x2[i] = x[i] + fw_dx[i];
+    rms_norm_quant192(fw_x2, fw_xn2, M.unembed.s_act, fw_q);
+    float sx = 0.0f, sn = 0.0f;
+    for (int i = 0; i < D; i++) {
+      sx += fw_x2[i] * fw_x2[i];
+      sn += fw_xn2[i] * fw_xn2[i];
+      fw_xn[i] = fw_xn2[i];
+    }
+    fw_denom = sx > 0.0f ? std::sqrt(sn / sx) : 0.0f;
+    qgemv_f32(M.unembed.m, fw_q, fw_logits);  // rows_padded 208
+    head_softcap_softmax(fw_logits, fw_probs208);  // fw_logits -> 15 tanh(l/15)
+    std::memcpy(fw_lc, fw_logits, sizeof(float) * V);
+    std::memcpy(fw_p, fw_probs208, sizeof(float) * V);
+  }
+
+  // FW backward + update on the last read row's FW prediction with target y:
+  // gradient of the cross-entropy on the soft-capped logits, back through the
+  // frozen unembedding (float copy) and the RMS norm to x, then one
+  // NLMS-style step on dW with FW-ROW per-feature RMS preconditioning and the
+  // DIC kappa schedule kappa_t = 1.5e-3 + 4.5e-3 / (1 + t / 8000).
+  void fw_update(uint8_t y) {
+    float dl[V];
+    for (int o = 0; o < V; o++) {
+      const float d = fw_p[o] - (o == int(y) ? 1.0f : 0.0f);
+      const float c = fw_lc[o] * (1.0f / 15.0f);
+      dl[o] = d * (1.0f - c * c);
+    }
+    float gxn[D];
+    for (int i = 0; i < D; i++) gxn[i] = 0.0f;
+    const float* U = M.unembed_f32.data();
+    for (int o = 0; o < V; o++) {
+      const float g = dl[o];
+      const float* row = U + size_t(o) * D;
+      for (int i = 0; i < D; i++) gxn[i] += row[i] * g;
+    }
+    float m = 0.0f;
+    for (int i = 0; i < D; i++) m += gxn[i] * fw_xn[i];
+    m *= (1.0f / float(D));
+    float gx[D];
+    for (int i = 0; i < D; i++) gx[i] = fw_denom * (gxn[i] - fw_xn[i] * m);
+    // FW-RULES: kappa_t = kf + (k0 - kf) / (1 + t / tau)
+    const double kap = 1500.0e-6 + (6000.0e-6 - 1500.0e-6) / (1.0 + double(fw_t) / 8000.0);
+    fw_t++;
+    // FW-ROW: per-feature RMS preconditioning of the update direction, with
+    // per-block statistics (msd = mean RMS over the block's DMLP features).
+    // One NLMS step over the concatenated code of all FWK blocks: the joint
+    // denominator 1 + sum_b h_b . sh_b (FWK = 1 is exactly B).
+    const float fb = 999000.0e-6f;
+    float hsh = 0.0f;
+    for (int b = 0; b < FWK; b++) {
+      float* const v = fw_v[b];
+      const uint16_t* const idx = fw_idx[b];
+      const float* const h = fw_h[b];
+      float* const sh = fw_sh[b];
+      const int nnz = fw_nnz[b];
+      for (int i = 0; i < DMLP; i++) v[i] *= fb;
+      for (int k = 0; k < nnz; k++) v[idx[k]] += (1.0f - fb) * h[k] * h[k];
+      float msd = 0.0f;
+      for (int i = 0; i < DMLP; i++) msd += std::sqrt(v[i]);
+      msd *= 1.0f / float(DMLP);
+      for (int k = 0; k < nnz; k++) {
+        const float sk = msd / (std::sqrt(v[idx[k]]) + 1e-3f * msd + 1e-12f);
+        sh[k] = sk * h[k];
+        hsh += h[k] * sh[k];
+      }
+    }
+    const float step = float(kap) / (1.0f + hsh);
+    for (int b = 0; b < FWK; b++) {
+      const uint16_t* const idx = fw_idx[b];
+      const float* const sh = fw_sh[b];
+      const int nnz = fw_nnz[b];
+      float* const dWb = fw_dW.data() + size_t(b) * DMLP * D;
+      for (int k = 0; k < nnz; k++) {
+        float* col = dWb + size_t(idx[k]) * D;
+        const float c = step * sh[k];
+        for (int j = 0; j < D; j++) col[j] -= c * gx[j];
+      }
+    }
+  }
+#endif
 
   static void proj_add(const float* f, int d_in, const int8_t* q,
                        const float* fold, float s_act, float* acc_out) {
@@ -655,6 +800,9 @@ struct TransformerOptImpl {
     // Fail-safe: the flag holds for exactly one step.
     const bool gel = gelesen;
     gelesen = true;
+#if PORT_FW
+    fw_gel = gel;
+#endif
     const float* tok = M.tok_table + size_t(token) * D;
     if (M.paket.present) tok = paket_token_row(token);
     int nnzp;
@@ -716,6 +864,9 @@ struct TransformerOptImpl {
       PSCOPE(PS_EL_HEAD);
       head_softcap_softmax(logits, probs208);
       std::memcpy(probs_out, probs208, sizeof(float) * V);
+#if PORT_FW
+      fw_head();  // DUAL: the fast-weight distribution; probs_out is untouched
+#endif
     }
     t++;
   }
@@ -771,6 +922,11 @@ const float* TransformerOpt::last_hidden() const { return impl->xn; }
 int TransformerOpt::hidden_size() { return D; }
 
 AttnKind TransformerOpt::attn_kind() const { return impl->kind; }
+
+#if PORT_FW
+void TransformerOpt::fw_update(uint8_t target) { impl->fw_update(target); }
+const float* TransformerOpt::fw_probs() const { return impl->fw_probs208; }
+#endif
 
 }  // namespace opt
 }  // namespace fx2

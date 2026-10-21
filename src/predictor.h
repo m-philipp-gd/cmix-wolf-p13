@@ -39,6 +39,7 @@
 #include "adaptive_depth.h"
 #include "word_label.h"
 #include "lstm_mixer_inputs.h"
+#include "port_cfg.h"
 
 #include "ds/SmallVector.h"
 #include "ds/emhash_set.hpp"
@@ -123,6 +124,9 @@ class Predictor {
   std::optional<ByteMixer> byte_mixer_;
   float bitl_s1buf_[128] = {0.0f};
   std::optional<Tf1Slot> tf1_slot_;
+#if PORT_FW
+  std::optional<Tf1Slot> fw_slot_;   // FW-DUAL row of the transformer
+#endif
   word_label::State* wordlbl_ = nullptr;
   std::vector<bool> vocab_;
    FXCM fxcm_model_;

@@ -71,6 +71,9 @@ unsigned long long Predictor::GetNumModels() {
   num += byte_mixer_->NumOutputs();
   num += tf1_slot_->NumOutputs();
   num += 1;
+#if PORT_GEOM
+  num += 1;   // col 588: FW-DUAL row (0 when not wired)
+#endif
   return num;
 }
 
@@ -173,7 +176,15 @@ unsigned long long PredictorLayoutTagFast() {
  void Predictor::AddDoubleIndirect() {
   float delta = 400;
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind1,  manager_.bit_context_, delta, manager_.shared_map_);
+#if PORT_RESTORE_IND
+  // W2: the two double-indirect models neif removed, at their original place
+  // (fx2-cmix-transformer AddDoubleIndirect); they consume the two rand()
+  // calls the placeholder below kept for them.
+  indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind2,  manager_.bit_context_, delta, manager_.shared_map_);
+  indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind3,  manager_.bit_context_, delta, manager_.shared_map_);
+#else
   (void)rand(); (void)rand();
+#endif
   indirect_ns_models_.emplace_back(manager_.nonstationary_, manager_.ind5,  manager_.bit_context_, delta, manager_.shared_map_);
 }
 
@@ -209,6 +220,9 @@ unsigned int Discretize(float p) {
   }
   bitl_lhid_ = byte_mixer_->LstmHidden(&bitl_n_lhid_);
   tf1_slot_.emplace(vocab_);
+#if PORT_FW
+  fw_slot_.emplace(vocab_);
+#endif
 
   // The gate zone of the byte about to be coded.  A POINTER: the
   // automaton writes it once per byte (on already decoded tokens only), the
@@ -250,6 +264,9 @@ unsigned int Discretize(float p) {
 
   input_size = mixer_0_.size() + auxiliary_size_;
   ++input_size;
+#if PORT_GEOM
+  ++input_size;   // col 27: FW1 (0 when not wired); BITLSTM still reads cols 0..26
+#endif
   layers_[1].SetNumModels(input_size);
 
   // Final mixer with the transformer's gate zone as its context: zone 0 (not
@@ -276,6 +293,9 @@ namespace lstm_sharpen { State state; }
 float byte_mixer_output=0.0f;
 
 float tf1_slot_output=0.0f;
+#if PORT_FW
+float fw_slot_output=0.0f;
+#endif
  float Predictor::Predict() {
   fxcm_model_.PredictHalf();
   manager_.UpdateLx1();
@@ -400,14 +420,31 @@ float tf1_slot_output=0.0f;
                    (adepth_.coded >= (unsigned long long)0) &&
                    !adaptive_depth::MetaOff();
   }
+#if PORT_GEOM
+  // Col 588, appended AFTER the adaptive-depth gather: the AD feature set and
+  // its skip decisions (hence BITLSTM's bit set and position counter) do not
+  // see it.
+  const unsigned int fw_index = input_index++;
+#if PORT_FW
+  layers_[0].SetInput(fw_index, fw_slot_output);
+#else
+  layers_[0].SetZero(fw_index);
+#endif
+#endif
   const bool chr_skip_mix =
       (byte_mixer_override >= 0) && char_rate::Forced(manager_.bit_context_);
   float p;
   if (chr_skip_mix) {
     p = 0.5f;
+#if PORT_CASCADE
+  // W1: no cascade skip.  adepth_.skip (computed above, unchanged) only gates
+  // BITLSTM in the coder; the cascade, SSE and the final rules run on every bit.
+  } else {
+#else
   } else if (adepth_.skip) {
     p = adepth_.p;
   } else {
+#endif
   for (unsigned int i = 0; i < mixer_0_.size(); ++i) mixer_0_[i].Prime();
   mixer_1_[0].Prime();
   const unsigned int bank_n = mixer_0_.size();
@@ -429,6 +466,14 @@ float tf1_slot_output=0.0f;
   layers_[1].SetStretchedInput(mixer_0_.size(), aux_aux_in);
   layers_[1].SetStretchedInput(mixer_0_.size() + 1, layers_[0].Inputs()[byte_mixer_index]);
   layers_[1].SetStretchedInput(mixer_0_.size() + 2, layers_[0].Inputs()[tf1_slot_index]);
+#if PORT_GEOM
+#if PORT_FW
+  // FW1: the FW row's stretched input also feeds the final mixer.
+  layers_[1].SetStretchedInput(mixer_0_.size() + 3, layers_[0].Inputs()[fw_index]);
+#else
+  layers_[1].SetZero(mixer_0_.size() + 3);
+#endif
+#endif
 
   const float m1raw = mixer_1_[0].Mix();
   bitl_stage1_ = &layers_[1].Inputs()[0];
@@ -531,15 +576,20 @@ void Predictor::E2EGrad(int bit) {
   byte_model_->Perceive(bit);
   byte_mixer_->Perceive(bit);
   tf1_slot_->Perceive(bit);
+#if PORT_FW
+  fw_slot_->Perceive(bit);
+#endif
 
   if (char_rate::Forced(manager_.bit_context_)) {
     sse_.PerceiveContextOnly(bit);
     for (auto& mixer: mixer_0_) mixer.PerceiveSkip();
     for (auto& mixer: mixer_1_) mixer.PerceiveSkip();
+#if !PORT_CASCADE
   } else if (adepth_.skip) {
     sse_.PerceiveContextOnly(bit);
     for (auto& mixer: mixer_0_) mixer.PerceiveSkip();
     for (auto& mixer: mixer_1_) mixer.PerceiveSkip();
+#endif
   } else {
   E2EGrad(bit);
   PerceiveBank(&mixer_0_[0], mixer_0_.size(), bit);
@@ -613,11 +663,26 @@ void Predictor::E2EGrad(int bit) {
           || timestamp_skip::Laeuft()
          ) {
         tf1_slot_->SetProbsNeutral();
+#if PORT_FW
+        fw_slot_->SetProbsNeutral();
+        tf1_engine_->FwNeutral();
+#endif
       } else
+#if PORT_FW
+      {
       tf1_slot_->SetProbs(tf1_row);
+      fw_slot_->SetProbs(tf1_engine_->FwRow());
+      }
+#else
+      tf1_slot_->SetProbs(tf1_row);
+#endif
     } else {
       // no transformer: abstention row, arithmetically no slot at all.
       tf1_slot_->SetProbsOff();
+#if PORT_FW
+      fw_slot_->SetProbsOff();
+      if (tf1_engine_) tf1_engine_->FwNeutral();
+#endif
     }
     {
     const std::valarray<float>& p = byte_model_->BytePredict();
@@ -638,6 +703,9 @@ void Predictor::E2EGrad(int bit) {
   lstmex=byte_mixer_->ex;
   lstm_fx_link::Push(lstmpr, lstmex);
   tf1_slot_output = tf1_slot_->Predict()[0];
+#if PORT_FW
+  fw_slot_output = fw_slot_->Predict()[0];
+#endif
   lstm_sharpen::state.full_alive =
       (lstm_sharpen::state.full_ex >= byte_mixer_->Lx1Bot() &&
        lstm_sharpen::state.full_ex <= byte_mixer_->Lx1Top()) ? 1 : 0;

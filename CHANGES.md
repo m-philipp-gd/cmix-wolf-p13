@@ -1,3 +1,42 @@
+# Changes against `cmix-neif-1.0` (this line: cmix-wolf P13)
+
+This entry (cmix-wolf) derives from cmix-neif-1.0 by Marcus Woelk, which itself
+derives from cmix-lex/fx2-cmix (see the original modification notice below).
+All upstream LICENSE (GPL-3), NOTICE.md and attribution material are retained
+unmodified. The changes of this line on top of cmix-neif-1.0 are:
+
+1. **Per-row decay for the readalike prior (PRL)** (PORT_PRL=1): present in
+   the shipped code, not active in the author's configuration.
+
+2. **E1 interpolation** (NEIF_E1=1) and **E3b timestamp windows** (NEIF_E3B=1,
+   kN=9) from the author's own ablation studies (ABLATIONS.md, b1_interp.h),
+   shipped in the code but not enabled in the author's configuration.
+
+3. **IND restore subset** (PORT_RESTORE_IND=1): the context restore path uses
+   the IND variant of PORT_RESTORE.
+
+4. **PPMd logit-prior gate kGate = 0.35** (upstream 0.55): the fixed factor g
+   mixing the PPMd logit prior into the residual mix is lowered from 550/1000
+   to 350/1000.
+
+5. **makefile**: the packed encoder build (prof_use target) does not consume
+   the PGO profile, and links with lld-18, matching the author's documented
+   18.1.3 reference build.
+
+Measured (enwik9, single core, local x86-64 host): span16 payload 2,024,891 B
+vs author 2,048,995 B (-24,060 B). Full-stream encode finished in 54.0 h with
+archive9 91,885,607 B, S = 95,877,500 B (-388 B vs the F10 reference build,
+91,885,965 B; -36,551 B vs the upstream entry). Single-core full-stream
+decode of the F10 reference archive9 verified bit-exactly against enwik9
+(sha256) in 41.6 h on the local test host; the P13 archive9 re-verification
+(same decode chain) is running and lands with the same expectation — clear
+margin to the 53.6 h limit.
+The P13 binary reproduces byte-exactly from this tree with
+`bash build_and_construct_comp.sh` (clang/lld 18.1.3): comp9 md5
+`3597e9b9ae2260cc0aa644ca145db9a1`, 3,991,874 B.
+
+---
+
 # Changes against `cmix-lex`
 
 The reference point is `cmix-lex` by Ibrahim Marcouch, derived from `fx2-cmix`
@@ -14,10 +53,10 @@ simplifications, error handling and console messages, removal of unused code,
 and small run-time and memory improvements) that are not listed one by one.
 
 This file is the modification notice required by section 5a of the GNU General
-Public License. Sections 3 and 4 of `README.md` carry the same material with
+Public License. Sections 3 and 4 of `doc/README_upstream.md` carry the same material with
 the measurements, the individual items and the reasons; `NOTICE.md` and
 `training/ATTRIBUTION.md` name the borrowed parts and their authors. Section 6
-of `README.md` lists further optimisation opportunities that are not part of
+of `doc/README_upstream.md` lists further optimisation opportunities that are not part of
 this entry.
 
 ## 1. The byte model
@@ -197,7 +236,7 @@ file. The program pages the model itself, with its data in a pool of 4 KiB
 frames that is paged in and out with `pread` and `pwrite`, written back only
 where it was written, and sized at run time from `/proc/self/statm` in steps of
 64 MiB, up to 4 GiB, for a margin of 256 MiB below the limit; section 4.8 of
-`README.md` describes it. The memory for a
+`doc/README_upstream.md` describes it. The memory for a
 large pool comes from the compact context-map buckets and smaller maps (about
 2 GiB), the removed models and narrower tables (about 0.7 GiB), one compact
 table each for the metadata block and for redirects and aliases, and memory

@@ -19,12 +19,12 @@ Mixer::Mixer(const std::valarray<float>& inputs,
     context_(context), /*max_steps_(1),*/ steps_(0),
     context_base_(inputs.size(), extra_inputs_size_)
     {
-  if (inputs_size_ != 588 &&
-      inputs_size_ != 27) {
+  if (inputs_size_ != PORT_N0 &&
+      inputs_size_ != PORT_N1) {
     fprintf(stderr,
         "\nbuild check: mixer with %u inputs, compiled N0=%d (layer 0), N1=%d (layer 1)\n",
-        (unsigned)inputs_size_, (int)588,
-        (int)27);
+        (unsigned)inputs_size_, (int)PORT_N0,
+        (int)PORT_N1);
     fflush(stderr);
     abort();
   }
@@ -107,8 +107,8 @@ float Mixer::Mix() {
   const float* const inputs = &inputs_[0];
   const mixw_t* const weights = &data->weights[0];
   float p = 0;
-  if (inputs_size_ == 588) {
-    for (unsigned int i = 0; i < 588; ++i) {
+  if (inputs_size_ == PORT_N0) {
+    for (unsigned int i = 0; i < PORT_N0; ++i) {
       p += inputs[i] * weights[i];
     }
   } else {
@@ -132,6 +132,27 @@ float Mixer::Mix() {
   return p_;
 }
 
+#if PORT_PRL
+// PRL (port of Z's h3_prl_patch_20260926, mixer_lex.zig perceive): a row that
+// has seen few updates keeps a high step even after the mixer's global step
+// schedule has decayed: decay = max(global(steps_), row(n)), row(n) = 1.0 /
+// 0.7 / 0.3 / floor at n < 1k / 5k / 25k / else.  n counts the updates that
+// reached this row (after the early-out) and is never reset.
+static inline void PrlDecay(ContextData* data, float* decay) {
+  const uint32_t n = data->n;
+  data->n = n + 1u;
+  float rd = mixdecay::kFinal;
+  if (n < 25000u) {
+    rd = 0.3f;
+    if (n < 5000u) {
+      rd = 0.7f;
+      if (n < 1000u) rd = 1.0f;
+    }
+  }
+  if (rd > *decay) *decay = rd;
+}
+#endif
+
 void Mixer::Perceive(int bit) {
   ContextData* primed = primed_data_;
   primed_data_ = nullptr;
@@ -154,14 +175,21 @@ void Mixer::Perceive(int bit) {
       return;
   }
    // ++data->steps;
+#if PORT_PRL
+  ContextData* data = primed ? primed : GetContextData();
+  PrlDecay(data, &decay);
+  update = decay * update;
+  update *= mxlr_g_;
+#else
   update = decay * update;
   update *= mxlr_g_;
   ContextData* data = primed ? primed : GetContextData();
+#endif
 
   mixw_t* const weights = &data->weights[0];
   const float* const inputs = &inputs_[0];
-  if (inputs_size_ == 588) {
-    for (unsigned int i = 0; i < 588; ++i) {
+  if (inputs_size_ == PORT_N0) {
+    for (unsigned int i = 0; i < PORT_N0; ++i) {
       weights[i] -= update * inputs[i];
     }
   } else {
@@ -255,9 +283,16 @@ bool Mixer::BankPrepUpdate(int bit, float* update_out) {
   if(fabsf(update)<0.000000000005f && extra_inputs_size_>0) {
       return false;
   }
+#if PORT_PRL
+  bank_data_ = primed ? primed : GetContextData();
+  PrlDecay(bank_data_, &decay);
+  update = decay * update;
+  update *= mxlr_g_;
+#else
   update = decay * update;
   update *= mxlr_g_;
   bank_data_ = primed ? primed : GetContextData();
+#endif
 
   *update_out = update;
   return true;

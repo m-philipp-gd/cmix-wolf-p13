@@ -18,7 +18,7 @@ namespace ppm_logit_prior {
 
 // g as a float constant.  G1000 = 0 would give exactly 0.0f, and `sum += bias`
 // would leave `sum` bit-exactly unchanged.
-static constexpr float kGate  = 550 / 1000.0f;
+static constexpr float kGate  = 350 / 1000.0f;
 static constexpr float kFloor = 1e-6f;
 static constexpr float kLn2   = 0.69314718055994531f;
 

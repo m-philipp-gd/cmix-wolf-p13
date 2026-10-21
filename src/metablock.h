@@ -13,8 +13,12 @@
 #include <algorithm>
 #include <vector>
 
+#include "neif_levers.h"
 #include "ppmd_meta.h"
 #include "timestamp_algebra.h"
+#if NEIF_E1
+#include "b1_interp.h"
+#endif
 
 namespace metablock {
 
@@ -262,6 +266,16 @@ class Einheit {
         for (int j = i; j < e; ++j) if (!FestAlpha(p[j])) { alpha = false; break; }
         if (alpha) return 1;
       }
+#if NEIF_E1
+      // B1 line: delta '+' [-]residual
+      if (i > d0 && i < e && p[i] == b1_interp::kMark) {
+        int j = i + 1;
+        if (j < e && p[j] == 0x2d) ++j;
+        const int r0 = j;
+        while (j < e && p[j] >= 0x30 && p[j] <= 0x39) ++j;
+        if (j > r0 && j == e) return 1;
+      }
+#endif
     }
     return 2;
   }
@@ -286,7 +300,20 @@ class Einheit {
     const unsigned char* e = p + n;
     const unsigned char* t = (const unsigned char*)memchr(p, kTab, (size_t)n);
     if (!t) t = e;
+#if NEIF_E1
+    const unsigned char* const fe = t;    // end of field 1
+    const unsigned char* mp_rv = nullptr;
+    bool b1 = false;
+    {
+      const unsigned char* dz = p;
+      if (dz < fe && *dz == 0x2d) ++dz;
+      while (dz < fe && *dz >= 0x30 && *dz <= 0x39) ++dz;
+      b1 = dz < fe && *dz == b1_interp::kMark;
+      mp_rv = b1 ? dz : fe - 4;
+    }
+#else
     const unsigned char* mp_rv = t - 4;
+#endif
     if (mp_rv < p) Fail("A line too short for the revid");
     t = mp_rv;                            // the page id delta ends here
     long long d = 0;
@@ -301,6 +328,22 @@ class Einheit {
     id_lauf_ += vz * d;
     if (id_lauf_ < 0) Fail("running page id negative");
     long long rv = 0;
+#if NEIF_E1
+    if (b1) {                             // '+' [-]residual vs the interpolation
+      const unsigned char* q2 = mp_rv + 1;
+      long long res = 0;
+      int vz2 = 1;
+      if (q2 < fe && *q2 == 0x2d) { vz2 = -1; ++q2; }
+      if (q2 == fe) Fail("B1 line without revid residual");
+      for (; q2 < fe; ++q2) {
+        if (*q2 < 0x30 || *q2 > 0x39) Fail("revid residual not numeric");
+        res = res * 10 + (*q2 - 0x30);
+      }
+      rv = b1_.Prognose(id_lauf_) + vz2 * res;
+      if (rv < 0) Fail("B1 revid negative");
+      b1_.Add(id_lauf_, rv);
+    } else
+#endif
     for (int mq = 0; mq < 4; ++mq) {
       if (!MpAlpha(mp_rv[mq]))
         Fail("revid digit outside the base-100 alphabet");
@@ -438,6 +481,9 @@ class Einheit {
         st_.b_zeilen != (unsigned long long)243425)
       Fail("A or B line count differs from the page count");
     text_.shrink_to_fit();
+#if NEIF_E1
+    b1_.Clear();
+#endif
     std::vector<unsigned int>().swap(hoff_);
     std::vector<unsigned int>().swap(hlen_);
   }
@@ -452,6 +498,9 @@ class Einheit {
   bool tail_closed_ = false, nach_endet_ = false, bzeile_ = false;
 
   long long id_lauf_ = 0;
+#if NEIF_E1
+  b1_interp::Interp b1_;             // E1: B1 page id -> revid, stream order
+#endif
   size_t bk_ = 0;
   int byy_ = 0;
   long long bmt_ = 0, bsek_ = 0;

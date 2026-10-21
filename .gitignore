@@ -1,0 +1,30 @@
+# build outputs
+*.o
+cmix
+cmix_aux
+cmix.unpacked
+cmix.cutguard
+cmix.map
+pak_pack/
+run/
+
+# runtime scratch (created by encode/decode runs)
+*.cmix.temp
+ppm.page
+.dict
+.dict.comp
+.dict.comp_decomp
+.ready4cmix
+.ready4cmix_decomp
+.main
+.main_phda9prepr
+.main_reordered
+.coda
+.intro
+.new_article_order
+.new_article_order.comp
+.decomp_bin
+
+# python
+__pycache__/
+*.pyc

@@ -1,29 +1,40 @@
-# Build environment of this entry
+# Build environment of this entry (cmix-wolf P13 line)
 #
-# The toolchain is part of the artefact: the binary is built with
-# profile-guided optimisation and LTO, and lld does the code
-# generation.  A different major version produces a different binary.
+# The toolchain is part of the artefact: lld does the code generation and
+# a different major version produces a different binary.  The packed
+# encoder (prof_use target) is built with LTO and does not consume a PGO
+# profile (the makefile drops -fprofile-use for that target); the PGO
+# profile under pgo_data/ ships unchanged from upstream but is not read
+# during the packed build.  See CHANGES.md item 5.
 
-source date            2026-10-02T18:32:52Z
+source date            2026-10-21 (P13 line finalized; comp9 rebuilds
+                       byte-exactly from this tree)
 target                 linux-x86_64, x86-64-v3 (AVX2+FMA), single thread
+test host                local x86-64 single-core desktop; all reported times
+                       were measured there, one core, no other load (the
+                       judging machine re-runs decoding on its own hardware)
 
-## toolchain of the machine that generated this package
+## toolchain required to reproduce this package byte-exactly
 clang++-18             Ubuntu clang version 18.1.3 (1ubuntu1)
 clang-18               Ubuntu clang version 18.1.3 (1ubuntu1)
 ld.lld-18              Ubuntu LLD 18.1.3 (compatible with GNU linkers)
 llvm-profdata-18       Ubuntu LLVM version 18.1.3
 llvm-objcopy-18        llvm-objcopy, compatible with GNU objcopy
 llvm-strip-18          llvm-strip, compatible with GNU strip
-make                   GNU Make 4.3
-objcopy                GNU objcopy (GNU Binutils for Ubuntu) 2.42
+make                   GNU Make 4.4.1
+objcopy                GNU objcopy (GNU Binutils for Debian) 2.45.50.20251209
 
-kernel                 Linux 6.8.0-137-generic
-distribution           Ubuntu 24.04.4 LTS
+## submitted artefacts (cmix-wolf P13)
+comp9 sha256           5443e50b1a5bedab135fbbe4b2b1ab2877d8a1c9ca8f3f112889835fbf170cbf
+comp9 bytes            3991874
+comp9 md5              3597e9b9ae2260cc0aa644ca145db9a1
+comp9.args             "-e enwik9 archive9" (19 bytes)
+archive9 sha256        4d44a185d913f2e1303685f81f82b71d83b156981da66b456ca16f8626336edd
+archive9 bytes         91885607
+full-stream S          95877500 = 3991874 + 91885607 + 19
+                       (encode 2026-10-17..20, 54.0 h wall; S is -36551 bytes
+                       below the upstream entry 95914051)
 
-## submitted artefacts
-# Measured on the shipped files themselves; the same sums stand in the
-# result table of README.md.
-comp9 sha256           8b07d85f0a374b55688fd08d1a464222f766efbb5bfefc2bc94d6abb201133d7
-archive9 sha256        30eaf239168bd4efb4c57af09002b968308d7614d0cca619540e971fc38f4f18
-comp9 bytes            4000689
-archive9 bytes         91913343
+The upstream cmix-neif-1.0 artefact values (comp9 4,000,689 B,
+archive9 91,913,343 B) describe the upstream entry and are superseded
+by the values above.

@@ -16,6 +16,7 @@
 #include "../mixer_chain.h"
 
 #include "../mixer_lr_restart.h"
+#include "../port_cfg.h"
 #include <memory>
 
 typedef float mixw_t;
@@ -33,6 +34,9 @@ struct ContextData {
   ContextData& operator=(ContextData&&) = default;
   //unsigned long long steps;
   arena_row_t weights, extra_weights;
+#if PORT_PRL
+  uint32_t n = 0;   // PRL: updates applied to this row (never reset)
+#endif
 
 };
 
