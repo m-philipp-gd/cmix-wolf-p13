@@ -37,7 +37,7 @@ Item-by-item description and measurements: `CHANGES.md`.
 |---|---:|
 | span16 payload (16 MiB slice at 381 MiB) | 2,024,891 B vs author 2,048,995 B (-24,060 B) |
 | full-stream encode, wall clock | 54.0 h |
-| full-stream decode | **40.1 h single core**, enwik9 reproduced bit-exactly (sha256 159b8535...); F10 reference build: 41.6 h (same host, same gate); both clear of the 53.6 h limit |
+| full-stream decode | **40.1 h single core on the local measurement host**, enwik9 reproduced bit-exactly (sha256 159b8535...); F10 reference build: 41.6 h (same host, same gate). Projected onto the judging reference machine (Google Cloud c2d, AMD EPYC 7B13, Geekbench 5 single-core T = 1306, limit 70,000/T = 53.60 h): about 48-49 h, at parity with the upstream entry's own 48.73 h on that machine (controlled single-core A/B spans within 0.5 %) |
 | memory | under the 10 GiB rule: the PPMd pool self-sizes via /proc/self/statm (upstream measured 9.75 GiB, same mechanism) |
 | free disk | about 21 GB in the working directory (upstream measurement, layout unchanged) |
 

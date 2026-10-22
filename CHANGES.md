@@ -30,7 +30,11 @@ archive9 91,885,607 B, S = 95,877,500 B (-388 B vs the F10 reference build,
 decode of the F10 reference archive9 verified bit-exactly against enwik9
 (sha256) in 41.6 h on the local test host. Full-stream decode of THIS entry's
 submitted archive9 verified bit-exactly against enwik9 (sha256) in 40.1 h
-single core — clear margin to the 53.6 h limit. Roundtrip complete:
+single core on the local measurement host. Projected onto the judging
+reference machine (Google Cloud c2d, AMD EPYC 7B13, Geekbench 5 single-core
+T = 1306, limit 70,000/T = 53.60 h): about 48-49 h, at parity with the
+upstream entry's own 48.73 h on that machine (controlled single-core A/B
+spans within 0.5 %), i.e. inside the limit. Roundtrip complete:
 encode, span gates and full-stream decode all pass.
 The P13 binary reproduces byte-exactly from this tree with
 `bash build_and_construct_comp.sh` (clang/lld 18.1.3): comp9 md5
