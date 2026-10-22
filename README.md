@@ -37,7 +37,7 @@ Item-by-item description and measurements: `CHANGES.md`.
 |---|---:|
 | span16 payload (16 MiB slice at 381 MiB) | 2,024,891 B vs author 2,048,995 B (-24,060 B) |
 | full-stream encode, wall clock | 54.0 h |
-| full-stream decode | F10 reference verified bit-exact against enwik9 (sha256) in 41.6 h single core; the P13 archive9 re-verification (same decode chain) is running |
+| full-stream decode | **40.1 h single core**, enwik9 reproduced bit-exactly (sha256 159b8535...); F10 reference build: 41.6 h (same host, same gate); both clear of the 53.6 h limit |
 | memory | under the 10 GiB rule: the PPMd pool self-sizes via /proc/self/statm (upstream measured 9.75 GiB, same mechanism) |
 | free disk | about 21 GB in the working directory (upstream measurement, layout unchanged) |
 

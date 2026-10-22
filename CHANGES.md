@@ -28,9 +28,10 @@ vs author 2,048,995 B (-24,060 B). Full-stream encode finished in 54.0 h with
 archive9 91,885,607 B, S = 95,877,500 B (-388 B vs the F10 reference build,
 91,885,965 B; -36,551 B vs the upstream entry). Single-core full-stream
 decode of the F10 reference archive9 verified bit-exactly against enwik9
-(sha256) in 41.6 h on the local test host; the P13 archive9 re-verification
-(same decode chain) is running and lands with the same expectation — clear
-margin to the 53.6 h limit.
+(sha256) in 41.6 h on the local test host. Full-stream decode of THIS entry's
+submitted archive9 verified bit-exactly against enwik9 (sha256) in 40.1 h
+single core — clear margin to the 53.6 h limit. Roundtrip complete:
+encode, span gates and full-stream decode all pass.
 The P13 binary reproduces byte-exactly from this tree with
 `bash build_and_construct_comp.sh` (clang/lld 18.1.3): comp9 md5
 `3597e9b9ae2260cc0aa644ca145db9a1`, 3,991,874 B.
